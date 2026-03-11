@@ -1,0 +1,17 @@
+langchain
+langchain-community
+langchain-openai
+llama-index
+faiss-cpu
+sentence-transformers
+openai
+fastapi
+uvicorn
+gradio
+pypdf
+rank-bm25
+python-dotenv
+pydantic
+groq
+transformers
+torch

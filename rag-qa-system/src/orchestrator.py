@@ -13,39 +13,27 @@ from src.graph_nodes import (
     reload_indexes
 )
 from src.graph_edges import (
-    route_after_grading,
     route_after_retrieval,
+    route_after_grading,
     route_after_answer_grading
 )
 
 
-def build_rag_graph() -> StateGraph:
+def build_rag_graph():
     """
-    Assembles the full agentic RAG graph.
+    Assembles and compiles the full agentic RAG graph.
 
-    Nodes:
-        plan_query       → analyze and plan search queries
-        retrieve         → hybrid search FAISS + BM25
-        grade_retrieval  → filter irrelevant chunks
-        rewrite_query    → improve failed queries
-        rerank           → cross-encoder reranking
-        generate_answer  → LLM answer with citations
-        grade_answer     → validate answer quality
-        finalize         → package final response
-
-    Edges:
-        plan_query → retrieve
-        retrieve →(conditional)→ grade_retrieval OR finalize
-        grade_retrieval →(conditional)→ rewrite_query OR rerank
-        rewrite_query → retrieve
-        rerank → generate_answer
-        generate_answer → grade_answer
-        grade_answer →(conditional)→ generate_answer OR finalize
-        finalize → END
+    Graph structure:
+      plan_query → retrieve →(conditional)→ grade_retrieval OR finalize
+      grade_retrieval →(conditional)→ rewrite_query OR rerank
+      rewrite_query → retrieve
+      rerank → generate_answer → grade_answer
+      grade_answer →(conditional)→ generate_answer OR finalize
+      finalize → END
     """
     graph = StateGraph(AgentState)
 
-    # ─── Add all nodes ────────────────────────────────
+    # Add all nodes
     graph.add_node("plan_query", plan_query_node)
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("grade_retrieval", grade_retrieval_node)
@@ -55,61 +43,46 @@ def build_rag_graph() -> StateGraph:
     graph.add_node("grade_answer", grade_answer_node)
     graph.add_node("finalize", finalize_node)
 
-    # ─── Set entry point ──────────────────────────────
+    # Entry point
     graph.set_entry_point("plan_query")
 
-    # ─── Fixed edges ──────────────────────────────────
+    # Fixed edges
     graph.add_edge("plan_query", "retrieve")
     graph.add_edge("rewrite_query", "retrieve")
     graph.add_edge("rerank", "generate_answer")
     graph.add_edge("generate_answer", "grade_answer")
     graph.add_edge("finalize", END)
 
-    # ─── Conditional edges ────────────────────────────
+    # Conditional edges
     graph.add_conditional_edges(
         "retrieve",
         route_after_retrieval,
-        {
-            "grade": "grade_retrieval",
-            "no_documents": "finalize"
-        }
+        {"grade": "grade_retrieval", "no_documents": "finalize"}
     )
-
     graph.add_conditional_edges(
         "grade_retrieval",
         route_after_grading,
-        {
-            "rewrite": "rewrite_query",
-            "rerank": "rerank"
-        }
+        {"rewrite": "rewrite_query", "rerank": "rerank"}
     )
-
     graph.add_conditional_edges(
         "grade_answer",
         route_after_answer_grading,
-        {
-            "regenerate": "generate_answer",
-            "finalize": "finalize"
-        }
+        {"regenerate": "generate_answer", "finalize": "finalize"}
     )
 
     return graph.compile()
 
 
-# ─── Singleton graph instance ─────────────────────────
+# Singleton graph
 _graph = None
 
 
 def get_graph():
-    """
-    Returns singleton compiled graph.
-    Built once and reused for all requests.
-    """
     global _graph
     if _graph is None:
-        print("Building LangGraph agentic pipeline...")
+        print("Building LangGraph pipeline...")
         _graph = build_rag_graph()
-        print("Graph compiled successfully")
+        print("Graph compiled")
     return _graph
 
 
@@ -120,25 +93,15 @@ def run_agentic_pipeline(
     top_k: int = 5
 ) -> dict:
     """
-    Main entry point for the agentic RAG pipeline.
+    Main entry point. Runs the full agentic pipeline from question to answer.
 
-    Runs the full graph from question to final answer.
-
-    Returns dict with:
-    - question: original question
-    - answer: final answer text
-    - citations: list of source citations
-    - agent_trace: full reasoning trace
-    - status: success / no_documents / completed_with_warnings
-    - rewrite_count: how many query rewrites were needed
-    - generation_count: how many answer generations were needed
-    - answer_confidence: confidence score from answer grader
-    - hallucination_detected: whether hallucination was found
-    - latency_seconds: total pipeline time
+    Returns:
+        question, answer, citations, agent_trace, status,
+        rewrite_count, generation_count, answer_confidence,
+        hallucination_detected, latency_seconds
     """
     start = time.time()
 
-    # Create initial state
     initial_state = create_initial_state(
         question=question,
         session_id=session_id,
@@ -146,12 +109,10 @@ def run_agentic_pipeline(
         top_k=top_k
     )
 
-    # Get compiled graph
     graph = get_graph()
 
-    # Run the graph
     print(f"\n{'='*55}")
-    print(f"AGENTIC PIPELINE: '{question[:60]}'")
+    print(f"PIPELINE START: '{question[:60]}'")
     print(f"{'='*55}")
 
     try:
@@ -160,7 +121,7 @@ def run_agentic_pipeline(
         print(f"Pipeline error: {e}")
         return {
             "question": question,
-            "answer": f"Pipeline encountered an error: {str(e)}",
+            "answer": f"Pipeline error: {str(e)}",
             "citations": [],
             "agent_trace": [],
             "status": "error",
@@ -170,8 +131,6 @@ def run_agentic_pipeline(
             "hallucination_detected": False,
             "latency_seconds": round(time.time() - start, 2)
         }
-
-    latency = round(time.time() - start, 2)
 
     return {
         "question": question,
@@ -183,79 +142,48 @@ def run_agentic_pipeline(
         "generation_count": final_state.get("generation_count", 0),
         "answer_confidence": final_state.get("answer_confidence", 0.0),
         "hallucination_detected": final_state.get("hallucination_detected", False),
-        "latency_seconds": latency
+        "latency_seconds": round(time.time() - start, 2)
     }
 
 
 def format_trace_for_display(agent_trace: list[dict]) -> str:
-    """
-    Formats the agent trace into a readable string for UI display.
-    """
+    """Formats agent trace into a readable string for UI display."""
     if not agent_trace:
         return "No trace available"
 
     lines = []
     for event in agent_trace:
         node = event.get("node", "Unknown")
-        ev = event.get("event", "")
         details = event.get("details", {})
 
-        # Format each node nicely
         if node == "Query Planner":
             count = details.get("query_count", 1)
-            complex_tag = " (complex)" if details.get("is_complex") else ""
-            lines.append(f"🧠 Query Planner{complex_tag}: {count} search quer{'ies' if count > 1 else 'y'} planned")
-
+            tag = " (complex)" if details.get("is_complex") else ""
+            lines.append(f"🧠 Query Planner{tag}: {count} quer{'ies' if count > 1 else 'y'} planned")
         elif node == "Retrieval":
-            total = details.get("total_chunks", 0)
-            queries = details.get("queries_run", 1)
-            lines.append(f"🔍 Retrieval: {total} chunks found across {queries} quer{'ies' if queries > 1 else 'y'}")
-
+            lines.append(f"🔍 Retrieval: {details.get('total_chunks', 0)} chunks found")
         elif node == "Retrieval Grader":
             passed = details.get("passed", 0)
             total = details.get("total", 0)
-            rate = details.get("pass_rate", 0)
-            needs = details.get("needs_rewrite", False)
-            tag = " ⚠️ triggering rewrite" if needs else " ✅"
-            lines.append(f"✅ Retrieval Grader: {passed}/{total} chunks relevant ({rate:.0%}){tag}")
-
+            tag = " ⚠️ rewrite triggered" if details.get("needs_rewrite") else " ✅"
+            lines.append(f"✅ Retrieval Grader: {passed}/{total} relevant{tag}")
         elif node == "Query Rewriter":
-            attempt = details.get("attempt", 1)
-            strategy = details.get("strategy", "")
-            rewritten = details.get("rewritten", "")
-            lines.append(f"✏️  Query Rewriter (attempt {attempt}): '{rewritten[:50]}' [{strategy}]")
-
+            lines.append(f"✏️  Query Rewriter (attempt {details.get('attempt', 1)}): '{details.get('rewritten', '')[:50]}' [{details.get('strategy', '')}]")
         elif node == "Reranker":
-            inp = details.get("input_chunks", 0)
-            out = details.get("output_chunks", 0)
-            lines.append(f"📊 Reranker: {inp} → top {out} chunks selected")
-
+            lines.append(f"📊 Reranker: {details.get('input_chunks', 0)} → top {details.get('output_chunks', 0)} chunks")
         elif node == "Answer Generator":
-            attempt = details.get("attempt", 1)
-            cites = details.get("citation_count", 0)
-            latency = details.get("latency", 0)
-            lines.append(f"💬 Answer Generator (attempt {attempt}): {cites} citations, {latency}s")
-
+            lines.append(f"💬 Answer Generator (attempt {details.get('attempt', 1)}): {details.get('citation_count', 0)} citations, {details.get('latency', 0)}s")
         elif node == "Answer Grader":
-            passes = details.get("passes", False)
-            conf = details.get("confidence", 0)
-            halluc = details.get("hallucination_detected", False)
-            status = "✅ PASS" if passes else "❌ FAIL"
-            halluc_tag = " 🚨 hallucination detected" if halluc else ""
-            lines.append(f"🔎 Answer Grader: {status} (confidence: {conf:.2f}){halluc_tag}")
-
+            status = "✅ PASS" if details.get("passes") else "❌ FAIL"
+            halluc = " 🚨 hallucination" if details.get("hallucination_detected") else ""
+            lines.append(f"🔎 Answer Grader: {status} (confidence: {details.get('confidence', 0):.2f}){halluc}")
         elif node == "Finalizer":
-            status = details.get("status", "")
-            rewrites = details.get("rewrite_count", 0)
-            gens = details.get("generation_count", 0)
-            lines.append(f"🏁 Finalizer: {status} | rewrites={rewrites} | generations={gens}")
+            lines.append(f"🏁 Done: {details.get('status', '')} | rewrites={details.get('rewrite_count', 0)} | generations={details.get('generation_count', 0)}")
 
     return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    print("Testing LangGraph Orchestrator...")
-
     result = run_agentic_pipeline(
         question="What is the attention mechanism in transformers?",
         session_id="test_phase7"
@@ -264,13 +192,13 @@ if __name__ == "__main__":
     print(f"\n{'='*55}")
     print("FINAL RESULT")
     print(f"{'='*55}")
-    print(f"Status:      {result['status']}")
-    print(f"Latency:     {result['latency_seconds']}s")
-    print(f"Rewrites:    {result['rewrite_count']}")
-    print(f"Generations: {result['generation_count']}")
-    print(f"Confidence:  {result['answer_confidence']:.2f}")
+    print(f"Status:        {result['status']}")
+    print(f"Latency:       {result['latency_seconds']}s")
+    print(f"Rewrites:      {result['rewrite_count']}")
+    print(f"Generations:   {result['generation_count']}")
+    print(f"Confidence:    {result['answer_confidence']:.2f}")
     print(f"Hallucination: {result['hallucination_detected']}")
-    print(f"\nAnswer:\n{result['answer'][:400]}...")
+    print(f"\nAnswer:\n{result['answer'][:400]}")
     print(f"\nCitations ({len(result['citations'])}):")
     for c in result["citations"]:
         print(f"  📄 {c.get('source')} — Page {c.get('page')}")

@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+test_*.py
+evaluate_*.py
+compare_*.py
+sample_chunks.json
+*.log

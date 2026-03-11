@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Frontend only needs gradio and requests — much lighter image
+RUN pip install --no-cache-dir gradio requests
+
+# Copy only the frontend file
+COPY frontend.py .
+
+# Expose Gradio port
+EXPOSE 7860
+
+# Start the frontend
+CMD ["python3", "frontend.py"]

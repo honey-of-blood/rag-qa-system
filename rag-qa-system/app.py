@@ -75,7 +75,7 @@ async def upload_documents(files: list[UploadFile] = File(...)):
     from src.document_loader import load_pdfs_from_folder
     from src.text_chunker import chunk_documents
     from src.embedder import load_embedding_model, generate_embeddings
-    from src.vector_store import build_index, save_index
+    from src.vector_store import build_faiss_index, save_index
     from src.bm25_retriever import build_bm25_index, save_bm25_index
 
     print(f"Rebuilding indexes with {len(uploaded_names)} new file(s)...")
@@ -84,7 +84,7 @@ async def upload_documents(files: list[UploadFile] = File(...)):
     chunks = chunk_documents(docs)
     embed_model = load_embedding_model()
     embeddings = generate_embeddings(chunks, embed_model)
-    index = build_index(embeddings)
+    index = build_faiss_index(embeddings)
     save_index(index, chunks)
     bm25 = build_bm25_index(chunks)
     save_bm25_index(bm25)
@@ -150,7 +150,8 @@ async def query_documents(request: QueryRequest):
         answer_confidence=result["answer_confidence"],
         hallucination_detected=result["hallucination_detected"],
         latency_seconds=result["latency_seconds"],
-        is_followup=is_followup
+        is_followup=is_followup,
+        agent_trace=result.get("agent_trace", [])
     )
 
 

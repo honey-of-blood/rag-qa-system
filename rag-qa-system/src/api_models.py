@@ -39,6 +39,7 @@ class QueryResponse(BaseModel):
     hallucination_detected: bool
     latency_seconds: float
     is_followup: bool
+    agent_trace: list[dict] = Field(default_factory=list)
 
 
 class UploadResponse(BaseModel):
